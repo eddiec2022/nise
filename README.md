@@ -10,6 +10,22 @@ The goal of NISE is to provide engineers with fast, accurate insights into firew
 
 # Current Capabilities
 
+## Multi-Vendor Architecture
+
+NISE is designed to support multiple firewall vendors.
+
+Vendor configurations are parsed and translated into a common normalized firewall model.  
+All analysis engines operate only on this normalized representation.
+
+This allows NISE to support additional vendors in the future without modifying the analysis engines.
+
+Future vendor support may include:
+
+- Cisco ASA
+- Fortinet
+- Check Point
+- cloud firewall policies
+
 ## Configuration Parsing
 NISE currently supports Palo Alto Networks firewall configurations.
 
@@ -214,26 +230,20 @@ docker run -it --rm -v ${PWD}:/app nise python main.py troubleshoot sample_panor
 
 ---
 
-# Roadmap
+## Roadmap
 
-Upcoming enhancements:
+### Near-term development priorities:
 
-### NAT Awareness
-Incorporate NAT policy evaluation into troubleshooting and exposure analysis.
+- NAT-aware troubleshooting
+- return-path analysis
+- dynamic route table support (live firewall RIB queries)
+- asymmetric path detection
 
-### Dynamic Route Awareness
-Support live route table queries from firewalls (RIB lookup).
+### Future capabilities:
 
-### Return Path Analysis
-Detect asymmetric routing and return-path failures.
-
-### Multi-Vendor Support
-Future support for:
-
-- Cisco ASA
-- Fortinet
-- Check Point
-- Cloud security platforms
+- multi-vendor firewall support
+- cloud security policy analysis
+- automated attack path visualization
 
 ### Cloud Security Visibility
 Integration with:

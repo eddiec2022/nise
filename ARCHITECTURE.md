@@ -501,3 +501,49 @@ Long-term:
 - cloud firewall analysis
 - attack path visualization
 - SaaS deployment model
+
+---
+
+## Multi-Vendor Design Guardrails
+
+NISE is already being built for future multi-vendor support through its normalized firewall model.  
+This means the long-term strategy is not to rewrite the analysis engines for each firewall vendor, but to convert each vendor's configuration into a common internal representation.
+
+### Core design rule
+All vendor-specific syntax and quirks must be handled in the parser layer or vendor-specific helper modules.  
+The normalized model and analysis engines must remain vendor-neutral.
+
+### Required separation
+- **Vendor parser layer**
+  - Palo Alto parser
+  - future Cisco ASA parser
+  - future Fortinet parser
+  - future Check Point parser
+  - future cloud security policy parsers
+
+- **Normalized model layer**
+  - common representation of interfaces, zones, routes, address objects, services, security rules, NAT rules, and related constructs
+
+- **Analysis engine layer**
+  - Policy Analysis Engine
+  - Attack Path Engine
+  - Critical Asset Exposure Engine
+  - Troubleshooting Engine
+  - future NAT and routing-aware engines
+
+### Architectural guardrails
+To preserve multi-vendor support as NISE grows:
+
+- analysis engines must never depend on raw vendor config structure
+- analysis engines must operate only on normalized objects
+- vendor-specific behaviors should be translated into normalized equivalents before analysis
+- parser-specific helpers should remain isolated from shared engine logic
+- future parser selection should be handled through a parser factory or equivalent dispatcher
+
+### Practical meaning
+For example:
+- Palo Alto XML, Cisco ASA CLI, and Fortinet CLI may all express policy differently
+- each parser must normalize those differences into the same internal `SecurityRule`, `RouteEntry`, `Interface`, `ZoneBinding`, and future `NatRule` objects
+- once normalized, the engines should analyze them the same way
+
+This keeps NISE scalable, maintainable, and ready for future multi-vendor expansion without requiring a redesign of the analysis engines.

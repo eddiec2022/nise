@@ -144,3 +144,7 @@ continuous configuration analysis
 automated security posture monitoring
 multi-environment visibility
 enterprise dashboards
+
+## Architectural Priorities
+
+- preserve strict vendor-neutral analysis by keeping vendor-specific logic in parsers and normalized-model translation layers
