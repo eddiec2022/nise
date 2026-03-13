@@ -1,7 +1,7 @@
 from ipaddress import ip_address, ip_network
 from typing import Any, Dict, List, Optional
 
-from app.models.normalized_firewall_model import Interface, RouteEntry, Scope
+from app.models.normalized_firewall_model import Interface, Scope
 
 
 class RouteLookup:
@@ -15,6 +15,7 @@ class RouteLookup:
         Resolution order:
         1. Connected subnet match from interface IP networks
         2. Longest-prefix static route match from normalized routes
+        3. Default route fallback (0.0.0.0/0)
 
         Returns a normalized evidence structure for downstream zone resolution.
         """
@@ -24,7 +25,6 @@ class RouteLookup:
                 "status": "invalid_input",
                 "ip": ip,
                 "method": None,
-                "confidence": "low",
                 "matched_prefix": None,
                 "egress_interface": None,
                 "virtual_router": None,
@@ -40,16 +40,24 @@ class RouteLookup:
         if static_match is not None:
             return static_match
 
+        default_match = self._lookup_default_route()
+        if default_match is not None:
+            default_match["ip"] = str(target_ip)
+            default_match["evidence"].insert(
+                0,
+                f"No connected subnet or specific static route matched {target_ip}",
+            )
+            return default_match
+
         return {
             "status": "unknown",
-            "ip": ip,
+            "ip": str(target_ip),
             "method": None,
-            "confidence": "low",
             "matched_prefix": None,
             "egress_interface": None,
             "virtual_router": None,
             "route_type": None,
-            "evidence": [f"No connected subnet or static route matched {ip}"],
+            "evidence": [f"No connected subnet, static route, or default route matched {target_ip}"],
         }
 
     def _lookup_connected(self, target_ip) -> Optional[Dict[str, Any]]:
@@ -80,7 +88,6 @@ class RouteLookup:
             "status": "resolved",
             "ip": str(target_ip),
             "method": "connected_subnet",
-            "confidence": "high",
             "matched_prefix": best["matched_prefix"],
             "egress_interface": best["interface"],
             "virtual_router": best["virtual_router"],
@@ -98,6 +105,9 @@ class RouteLookup:
         for route in self.scope.routes:
             network = self._safe_network(route.destination)
             if network is None:
+                continue
+
+            if network.prefixlen == 0:
                 continue
 
             if target_ip in network:
@@ -130,7 +140,54 @@ class RouteLookup:
             "status": "resolved",
             "ip": str(target_ip),
             "method": "route_lookup",
-            "confidence": "high" if best.get("interface") else "medium",
+            "matched_prefix": best["matched_prefix"],
+            "egress_interface": best.get("interface"),
+            "virtual_router": best.get("virtual_router"),
+            "route_type": best.get("route_type", "static"),
+            "zone": None,
+            "evidence": evidence,
+        }
+
+    def _lookup_default_route(self) -> Optional[Dict[str, Any]]:
+        defaults: List[Dict[str, Any]] = []
+
+        for route in self.scope.routes:
+            network = self._safe_network(route.destination)
+            if network is None:
+                continue
+
+            if str(network) != "0.0.0.0/0":
+                continue
+
+            defaults.append(
+                {
+                    "interface": route.interface,
+                    "virtual_router": route.virtual_router,
+                    "matched_prefix": str(network),
+                    "route_type": route.route_type,
+                    "next_hop": route.next_hop,
+                    "metric": route.metric,
+                    "admin_distance": route.admin_distance,
+                }
+            )
+
+        if not defaults:
+            return None
+
+        best = self._select_best_prefix(defaults)
+        evidence = [f"Using default route {best['matched_prefix']}"]
+
+        if best.get("interface"):
+            evidence.append(f"Default route uses egress interface {best['interface']}")
+        if best.get("next_hop"):
+            evidence.append(f"Next hop is {best['next_hop']}")
+        if best.get("virtual_router"):
+            evidence.append(f"Default route found in virtual router {best['virtual_router']}")
+
+        return {
+            "status": "resolved",
+            "ip": None,
+            "method": "default_route",
             "matched_prefix": best["matched_prefix"],
             "egress_interface": best.get("interface"),
             "virtual_router": best.get("virtual_router"),

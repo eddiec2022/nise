@@ -32,7 +32,6 @@ class ZoneResolver:
                 "ip": ip,
                 "zone": None,
                 "method": None,
-                "confidence": "low",
                 "evidence": route_result.get("evidence", []),
             }
 
@@ -52,7 +51,6 @@ class ZoneResolver:
                 "ip": ip,
                 "zone": iface.zone,
                 "method": route_result.get("method"),
-                "confidence": route_result.get("confidence", "medium"),
                 "egress_interface": iface.name,
                 "matched_prefix": route_result.get("matched_prefix"),
                 "virtual_router": route_result.get("virtual_router"),
@@ -65,7 +63,6 @@ class ZoneResolver:
             "ip": ip,
             "zone": None,
             "method": route_result.get("method"),
-            "confidence": "low",
             "egress_interface": interface_name,
             "matched_prefix": route_result.get("matched_prefix"),
             "virtual_router": route_result.get("virtual_router"),
