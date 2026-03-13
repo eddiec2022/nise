@@ -1,0 +1,22 @@
+[
+  {
+    "name": "Domain Controller",
+    "zone": "Internal-VRF1",
+    "criticality": "critical"
+  },
+  {
+    "name": "ERP Database",
+    "zone": "Internal-VRF2",
+    "criticality": "high"
+  },
+  {
+    "name": "Partner Web Portal",
+    "zone": "Public Secondary",
+    "criticality": "medium"
+  },
+  {
+    "name": "Guest Printer",
+    "zone": "Guest",
+    "criticality": "low"
+  }
+]
