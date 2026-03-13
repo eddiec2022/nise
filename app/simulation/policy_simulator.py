@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Set
 from app.models.normalized_firewall_model import (
     AddressGroup,
     AddressObject,
+    ApplicationGroup,
     FirewallConfig,
     Scope,
 )
@@ -42,6 +43,7 @@ class PolicySimulator:
 
         object_map = self._build_address_object_map(scope, config)
         group_map = self._build_address_group_map(scope, config)
+        app_group_map = self._build_application_group_map(scope, config)
 
         for index, rule in enumerate(scope.security_rules):
             if rule.disabled:
@@ -51,7 +53,7 @@ class PolicySimulator:
                 continue
             if not self._address_matches(rule.destination_addresses, destination, object_map, group_map):
                 continue
-            if not self._application_matches(rule.applications, application):
+            if not self._application_matches(rule.applications, application, app_group_map):
                 continue
             if not self._service_matches(rule.services, service, application):
                 continue
@@ -108,6 +110,19 @@ class PolicySimulator:
             group_map[grp.name.lower()] = grp
 
         return group_map
+
+    def _build_application_group_map(self, scope: Scope, config: FirewallConfig) -> Dict[str, ApplicationGroup]:
+        app_group_map: Dict[str, ApplicationGroup] = {}
+
+        for shared_scope in config.scopes:
+            if shared_scope.name == "shared":
+                for grp in shared_scope.application_groups:
+                    app_group_map[grp.name.lower()] = grp
+
+        for grp in scope.application_groups:
+            app_group_map[grp.name.lower()] = grp
+
+        return app_group_map
 
     def _address_matches(
         self,
@@ -177,17 +192,64 @@ class PolicySimulator:
         except ValueError:
             return False
 
-    def _application_matches(self, rule_values: List[str], application: str) -> bool:
-        normalized = {v.lower() for v in rule_values if v}
+    def _application_matches(
+        self,
+        rule_values: List[str],
+        application: str,
+        app_group_map: Optional[Dict[str, ApplicationGroup]] = None,
+    ) -> bool:
+        normalized = [v for v in rule_values if v]
         application = application.lower()
 
         if not normalized:
             return False
 
-        if "any" in normalized:
+        lowered = {v.lower() for v in normalized}
+        if "any" in lowered:
             return True
 
-        return application in normalized
+        for token in normalized:
+            if self._application_token_matches(
+                token=token,
+                application=application,
+                app_group_map=app_group_map or {},
+                visited_groups=set(),
+            ):
+                return True
+
+        return False
+
+    def _application_token_matches(
+        self,
+        token: str,
+        application: str,
+        app_group_map: Dict[str, ApplicationGroup],
+        visited_groups: Set[str],
+    ) -> bool:
+        token_l = token.lower()
+
+        if token_l == "any":
+            return True
+
+        if token_l == application:
+            return True
+
+        if token_l in app_group_map:
+            if token_l in visited_groups:
+                return False
+
+            visited_groups.add(token_l)
+
+            for member in app_group_map[token_l].members:
+                if self._application_token_matches(
+                    token=member,
+                    application=application,
+                    app_group_map=app_group_map,
+                    visited_groups=visited_groups,
+                ):
+                    return True
+
+        return False
 
     def _service_matches(self, rule_values: List[str], service: str, application: str) -> bool:
         normalized = {v.lower() for v in rule_values if v}

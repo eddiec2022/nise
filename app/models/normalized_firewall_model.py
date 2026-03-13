@@ -56,6 +56,10 @@ class AddressGroup(BaseModel):
     description: Optional[str] = None
     raw: Dict = Field(default_factory=dict)
 
+class ApplicationGroup(BaseModel):
+    name: str
+    members: List[str] = Field(default_factory=list)
+    raw: Dict = Field(default_factory=dict)
 
 class Interface(BaseModel):
     name: str
@@ -106,7 +110,7 @@ class Scope(BaseModel):
     address_groups: List[AddressGroup] = Field(default_factory=list)
     service_objects: List[str] = Field(default_factory=list)
     service_groups: List[str] = Field(default_factory=list)
-    application_groups: List[str] = Field(default_factory=list)
+    application_groups: List[ApplicationGroup] = Field(default_factory=list)
     security_rules: List["SecurityRule"] = Field(default_factory=list)
     nat_rules: List[str] = Field(default_factory=list)
 
@@ -114,6 +118,10 @@ class Scope(BaseModel):
     zone_bindings: List[ZoneBinding] = Field(default_factory=list)
     virtual_routers: List[VirtualRouter] = Field(default_factory=list)
     routes: List[RouteEntry] = Field(default_factory=list)
+    
+    managed_devices: List[str] = Field(default_factory=list)
+    template_names: List[str] = Field(default_factory=list)
+    default_vsys: Optional[str] = None
 
     def summary(self) -> Dict[str, int]:
         return {
@@ -130,6 +138,8 @@ class Scope(BaseModel):
             "zone_bindings": len(self.zone_bindings),
             "virtual_routers": len(self.virtual_routers),
             "routes": len(self.routes),
+            "managed_devices": len(self.managed_devices),
+            "template_names": len(self.template_names),
         }
 
 

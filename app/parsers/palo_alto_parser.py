@@ -6,6 +6,7 @@ from lxml import etree
 from app.models.normalized_firewall_model import (
     AddressGroup,
     AddressObject,
+    ApplicationGroup,
     DeploymentMode,
     FirewallConfig,
     Interface,
@@ -73,7 +74,11 @@ class PaloAltoParser(BaseParser):
 
         for vsys in vsys_entries:
             vsys_name = vsys.get("name") if vsys is not None else "default"
-            scope = Scope(name=vsys_name, scope_type=ScopeType.STANDALONE)
+            scope = Scope(
+                name=vsys_name,
+                scope_type=ScopeType.STANDALONE,
+                default_vsys=vsys_name,
+            )
 
             zone_entries = vsys.findall("./zone/entry") if vsys is not None else []
             self._populate_zone_data(scope, zone_entries)
@@ -91,7 +96,7 @@ class PaloAltoParser(BaseParser):
             scope.service_groups = self._extract_names(svc_group_entries)
 
             app_group_entries = vsys.findall("./application-group/entry") if vsys is not None else []
-            scope.application_groups = self._extract_names(app_group_entries)
+            scope.application_groups = [self._parse_application_group(entry) for entry in app_group_entries]
 
             sec_rule_entries = vsys.findall("./rulebase/security/rules/entry") if vsys is not None else []
             scope.security_rules = [self._parse_security_rule(rule) for rule in sec_rule_entries]
@@ -136,9 +141,10 @@ class PaloAltoParser(BaseParser):
         shared_scope.service_groups = self._extract_names(
             self.root.findall(".//shared/service-group/entry")
         )
-        shared_scope.application_groups = self._extract_names(
-            self.root.findall(".//shared/application-group/entry")
-        )
+        shared_scope.application_groups = [
+            self._parse_application_group(entry)
+            for entry in self.root.findall(".//shared/application-group/entry")
+        ]
 
         shared_pre_rules = self.root.findall(".//shared/pre-rulebase/security/rules/entry")
         shared_post_rules = self.root.findall(".//shared/post-rulebase/security/rules/entry")
@@ -156,7 +162,15 @@ class PaloAltoParser(BaseParser):
         dg_entries = self.root.findall(".//devices/entry/device-group/entry")
         for dg in dg_entries:
             dg_name = dg.get("name")
-            scope = Scope(name=dg_name, scope_type=ScopeType.DEVICE_GROUP)
+            scope = Scope(
+                name=dg_name,
+                scope_type=ScopeType.DEVICE_GROUP,
+            )
+
+            scope.managed_devices = [entry.get("name") for entry in dg.findall("./devices/entry") if entry.get("name")]
+            vsys_entries = dg.findall("./devices/entry/vsys/entry")
+            if vsys_entries:
+                scope.default_vsys = vsys_entries[0].get("name")
 
             zone_entries = dg.findall("./vsys/entry/zone/entry")
             self._populate_zone_data(scope, zone_entries)
@@ -165,7 +179,10 @@ class PaloAltoParser(BaseParser):
             scope.address_groups = [self._parse_address_group(entry) for entry in dg.findall("./address-group/entry")]
             scope.service_objects = self._extract_names(dg.findall("./service/entry"))
             scope.service_groups = self._extract_names(dg.findall("./service-group/entry"))
-            scope.application_groups = self._extract_names(dg.findall("./application-group/entry"))
+            scope.application_groups = [
+                self._parse_application_group(entry)
+                for entry in dg.findall("./application-group/entry")
+            ]
 
             dg_pre_rules = dg.findall("./pre-rulebase/security/rules/entry")
             dg_post_rules = dg.findall("./post-rulebase/security/rules/entry")
@@ -182,10 +199,40 @@ class PaloAltoParser(BaseParser):
         template_entries = self.root.findall(".//devices/entry/template/entry")
         for template in template_entries:
             template_name = template.get("name")
-            scope = Scope(name=template_name, scope_type=ScopeType.TEMPLATE)
+            scope = Scope(
+                name=template_name,
+                scope_type=ScopeType.TEMPLATE,
+                default_vsys=template.findtext("./settings/default-vsys"),
+            )
 
             network_root = template.find("./config/devices/entry/network")
             zone_entries = template.findall("./config/devices/entry/vsys/entry/zone/entry")
+            self._populate_zone_data(scope, zone_entries)
+
+            scope.interfaces = self._parse_interfaces(network_root)
+            scope.virtual_routers, scope.routes = self._parse_virtual_routers(network_root)
+
+            zone_by_interface = self._build_zone_by_interface(scope.zone_bindings)
+            vr_by_interface = self._build_vr_by_interface(scope.virtual_routers)
+            scope.interfaces = self._apply_interface_mappings(scope.interfaces, zone_by_interface, vr_by_interface)
+
+            self._refresh_scope_deployment_modes(scope)
+            config.scopes.append(scope)
+
+        template_stack_entries = self.root.findall(".//devices/entry/template-stack/entry")
+        for stack in template_stack_entries:
+            stack_name = stack.get("name")
+            scope = Scope(
+                name=stack_name,
+                scope_type=ScopeType.TEMPLATE_STACK,
+                default_vsys=stack.findtext("./settings/default-vsys"),
+            )
+
+            scope.template_names = [member.text for member in stack.findall("./templates/member") if member.text]
+            scope.managed_devices = [entry.get("name") for entry in stack.findall("./devices/entry") if entry.get("name")]
+
+            network_root = stack.find("./config/devices/entry/network")
+            zone_entries = stack.findall("./config/devices/entry/vsys/entry/zone/entry")
             self._populate_zone_data(scope, zone_entries)
 
             scope.interfaces = self._parse_interfaces(network_root)
@@ -466,6 +513,14 @@ class PaloAltoParser(BaseParser):
             description=entry.findtext("./description"),
             raw={"xml_tag": entry.tag},
         )
+        
+    def _parse_application_group(self, entry: etree._Element) -> ApplicationGroup:
+        members = [m.text for m in entry.findall("./members/member") if m.text]
+        return ApplicationGroup(
+            name=entry.get("name", "unnamed-application-group"),
+            members=members,
+            raw={"xml_tag": entry.tag},
+        )   
 
     def _parse_security_rule(self, rule_entry: etree._Element) -> SecurityRule:
         profile_group = rule_entry.findtext("./profile-setting/group/member")

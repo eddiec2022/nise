@@ -267,12 +267,18 @@ def print_troubleshooting_result(result: dict, auto_mode: bool = False) -> None:
         print(f"Resolved source zone: {result.get('source_zone')}")
         source_zone_resolution = result.get("source_zone_resolution")
         if source_zone_resolution:
-            print(f"  Method: {source_zone_resolution.get('method')}")
+            if source_zone_resolution.get("matched_prefix"):
+                print(f"  Route/Subnet: {source_zone_resolution.get('matched_prefix')}")
+            elif source_zone_resolution.get("method"):
+                print(f"  Method: {source_zone_resolution.get('method')}")
 
         print(f"Resolved destination zone: {result.get('destination_zone')}")
         destination_zone_resolution = result.get("destination_zone_resolution")
         if destination_zone_resolution:
-            print(f"  Method: {destination_zone_resolution.get('method')}")
+            if destination_zone_resolution.get("matched_prefix"):
+                print(f"  Route/Subnet: {destination_zone_resolution.get('matched_prefix')}")
+            elif destination_zone_resolution.get("method"):
+                print(f"  Method: {destination_zone_resolution.get('method')}")
     else:
         print(f"Source zone: {result.get('source_zone')}")
         print(f"Destination zone: {result.get('destination_zone')}")

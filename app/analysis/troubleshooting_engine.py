@@ -3,23 +3,20 @@ from typing import Dict, List, Optional
 from app.analysis.exposure_engine import ExposureEngine
 from app.analysis.traffic_identity import TrafficIdentity, TrafficIdentityBuilder
 from app.analysis.zone_resolver import ZoneResolver
-from app.models.normalized_firewall_model import FirewallConfig, Scope, SecurityRule
+from app.models.normalized_firewall_model import (
+    FirewallConfig,
+    Interface,
+    RouteEntry,
+    Scope,
+    ScopeType,
+    SecurityRule,
+    VirtualRouter,
+    ZoneBinding,
+)
 from app.simulation.policy_simulator import PolicySimulator
 
 
 class TroubleshootingEngine:
-    """
-    Connectivity Troubleshooting Engine v2.1
-
-    Enhancements:
-    - validates scope and zones
-    - optionally auto-resolves source/destination zones from IPs
-    - determines whether a zone-level allow path exists
-    - supports application-only, protocol/port-only, or combined input
-    - ranks the closest candidate rules
-    - explains why traffic is allowed or blocked
-    """
-
     MAX_CANDIDATES = 3
 
     def __init__(self) -> None:
@@ -39,7 +36,7 @@ class TroubleshootingEngine:
         protocol: Optional[str] = None,
         port: Optional[int] = None,
     ) -> Dict:
-        scope = self._find_scope(config, scope_name)
+        scope = self._find_effective_scope(config, scope_name)
         if scope is None:
             return {
                 "result": "error",
@@ -63,7 +60,7 @@ class TroubleshootingEngine:
                 ),
             }
 
-        available_zones = self._get_available_zones(config, scope_name)
+        available_zones = self._get_available_zones_from_scope(scope)
 
         source_zone_resolution = None
         destination_zone_resolution = None
@@ -119,6 +116,7 @@ class TroubleshootingEngine:
 
         object_map = self.policy_simulator._build_address_object_map(scope, config)
         group_map = self.policy_simulator._build_address_group_map(scope, config)
+        app_group_map = self.policy_simulator._build_application_group_map(scope, config)
 
         candidate_rules: List[Dict] = []
 
@@ -133,6 +131,7 @@ class TroubleshootingEngine:
                 traffic=traffic,
                 object_map=object_map,
                 group_map=group_map,
+                app_group_map=app_group_map,
             )
 
             if evaluation["matched"]:
@@ -227,6 +226,160 @@ class TroubleshootingEngine:
             "candidate_rules": top_candidates,
         }
 
+    def _find_effective_scope(self, config: FirewallConfig, scope_name: str) -> Optional[Scope]:
+        base_scope = self._find_scope(config, scope_name)
+        if base_scope is None:
+            return None
+
+        if base_scope.scope_type != ScopeType.DEVICE_GROUP:
+            return base_scope
+
+        matching_stacks = self._find_template_stacks_for_device_group(config, base_scope)
+        if not matching_stacks:
+            return base_scope
+
+        effective_scope = base_scope.model_copy(deep=True)
+
+        matching_templates: List[Scope] = []
+        seen_template_names = set()
+        for stack in matching_stacks:
+            for template_name in stack.template_names:
+                template_scope = self._find_scope(config, template_name)
+                if template_scope and template_scope.name not in seen_template_names:
+                    matching_templates.append(template_scope)
+                    seen_template_names.add(template_scope.name)
+
+        for template in matching_templates:
+            self._merge_forwarding_scope(effective_scope, template)
+
+        for stack in matching_stacks:
+            self._merge_forwarding_scope(effective_scope, stack)
+
+        return effective_scope
+
+    def _find_template_stacks_for_device_group(self, config: FirewallConfig, device_group_scope: Scope) -> List[Scope]:
+        device_serials = set(device_group_scope.managed_devices)
+        if not device_serials:
+            return []
+
+        matches: List[Scope] = []
+        for scope in config.scopes:
+            if scope.scope_type != ScopeType.TEMPLATE_STACK:
+                continue
+
+            if device_serials.intersection(scope.managed_devices):
+                matches.append(scope)
+
+        return matches
+
+    def _merge_forwarding_scope(self, target: Scope, source: Scope) -> None:
+        target.zones = sorted(set(target.zones).union(source.zones))
+
+        target.zone_bindings = self._merge_zone_bindings(target.zone_bindings, source.zone_bindings)
+        target.virtual_routers = self._merge_virtual_routers(target.virtual_routers, source.virtual_routers)
+        target.interfaces = self._merge_interfaces(target.interfaces, source.interfaces)
+        target.routes = self._merge_routes(target.routes, source.routes)
+
+        target.deployment_modes = sorted(
+            set(target.deployment_modes).union(source.deployment_modes),
+            key=lambda mode: mode.value,
+        )
+
+    def _merge_zone_bindings(
+        self,
+        existing: List[ZoneBinding],
+        incoming: List[ZoneBinding],
+    ) -> List[ZoneBinding]:
+        merged: Dict[str, ZoneBinding] = {binding.zone: binding.model_copy(deep=True) for binding in existing}
+
+        for binding in incoming:
+            if binding.zone not in merged:
+                merged[binding.zone] = binding.model_copy(deep=True)
+                continue
+
+            current = merged[binding.zone]
+            current.interfaces = sorted(set(current.interfaces).union(binding.interfaces))
+            if current.deployment_mode.value == "unknown":
+                current.deployment_mode = binding.deployment_mode
+
+        return list(merged.values())
+
+    def _merge_virtual_routers(
+        self,
+        existing: List[VirtualRouter],
+        incoming: List[VirtualRouter],
+    ) -> List[VirtualRouter]:
+        merged: Dict[str, VirtualRouter] = {vr.name: vr.model_copy(deep=True) for vr in existing}
+
+        for vr in incoming:
+            if vr.name not in merged:
+                merged[vr.name] = vr.model_copy(deep=True)
+                continue
+
+            current = merged[vr.name]
+            current.interfaces = sorted(set(current.interfaces).union(vr.interfaces))
+
+        return list(merged.values())
+
+    def _merge_interfaces(
+        self,
+        existing: List[Interface],
+        incoming: List[Interface],
+    ) -> List[Interface]:
+        merged: Dict[str, Interface] = {iface.name: iface.model_copy(deep=True) for iface in existing}
+
+        for iface in incoming:
+            if iface.name not in merged:
+                merged[iface.name] = iface.model_copy(deep=True)
+                continue
+
+            current = merged[iface.name]
+            incoming_copy = iface.model_copy(deep=True)
+
+            current.ip_networks = sorted(set(current.ip_networks).union(incoming_copy.ip_networks))
+            current.parent_interface = incoming_copy.parent_interface or current.parent_interface
+            current.tag = incoming_copy.tag if incoming_copy.tag is not None else current.tag
+            current.virtual_router = incoming_copy.virtual_router or current.virtual_router
+            current.zone = incoming_copy.zone or current.zone
+            current.vsys = incoming_copy.vsys or current.vsys
+            current.comment = incoming_copy.comment or current.comment
+
+            if current.deployment_mode.value == "unknown":
+                current.deployment_mode = incoming_copy.deployment_mode
+
+        return list(merged.values())
+
+    def _merge_routes(
+        self,
+        existing: List[RouteEntry],
+        incoming: List[RouteEntry],
+    ) -> List[RouteEntry]:
+        seen = {
+            (
+                route.destination,
+                route.interface,
+                route.next_hop,
+                route.virtual_router,
+                route.route_type,
+            )
+            for route in existing
+        }
+
+        merged = [route.model_copy(deep=True) for route in existing]
+        for route in incoming:
+            key = (
+                route.destination,
+                route.interface,
+                route.next_hop,
+                route.virtual_router,
+                route.route_type,
+            )
+            if key not in seen:
+                merged.append(route.model_copy(deep=True))
+                seen.add(key)
+
+        return merged
+
     def _resolve_zone(self, scope: Scope, ip: str) -> Dict:
         resolver = ZoneResolver(scope)
         return resolver.resolve(ip)
@@ -237,25 +390,11 @@ class TroubleshootingEngine:
                 return scope
         return None
 
-    def _get_available_zones(self, config: FirewallConfig, scope_name: str) -> List[str]:
-        scope = self._find_scope(config, scope_name)
-        if scope is None:
-            return []
-
-        blast_radius = self.exposure_engine.analyze_blast_radius(
-            config=config,
-            scope_name=scope_name,
-            start_zone=scope.zones[0] if scope.zones else "",
-        )
-
-        if "available_zones" in blast_radius:
-            return blast_radius["available_zones"]
-
+    def _get_available_zones_from_scope(self, scope: Scope) -> List[str]:
         zones = set(scope.zones)
         for rule in scope.security_rules:
             zones.update(z for z in rule.from_zones if z)
             zones.update(z for z in rule.to_zones if z)
-
         return sorted(zones)
 
     def _evaluate_rule(
@@ -266,6 +405,7 @@ class TroubleshootingEngine:
         traffic: TrafficIdentity,
         object_map: Dict,
         group_map: Dict,
+        app_group_map: Dict,
     ) -> Dict:
         checks = {
             "source_zone": self._zone_matches(rule.from_zones, source_zone),
@@ -282,7 +422,7 @@ class TroubleshootingEngine:
                 object_map,
                 group_map,
             ),
-            "application": self._application_context_matches(rule, traffic),
+            "application": self._application_context_matches(rule, traffic, app_group_map),
             "service": self._service_context_matches(rule, traffic),
         }
 
@@ -305,18 +445,24 @@ class TroubleshootingEngine:
         self,
         rule: SecurityRule,
         traffic: TrafficIdentity,
+        app_group_map: Dict,
     ) -> bool:
         if traffic.application:
             return self.policy_simulator._application_matches(
                 rule.applications,
                 traffic.application,
+                app_group_map,
             )
 
         if not traffic.candidate_applications:
             return True
 
         for candidate_app in traffic.candidate_applications:
-            if self.policy_simulator._application_matches(rule.applications, candidate_app):
+            if self.policy_simulator._application_matches(
+                rule.applications,
+                candidate_app,
+                app_group_map,
+            ):
                 return True
 
         return False
