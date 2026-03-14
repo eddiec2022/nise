@@ -136,6 +136,44 @@ Explanation: Zone-level path exists but no rule fully matches traffic identity.
 Closest candidate rule: Allow SSH
 Failure reason: source address mismatch
 
+---
+
+## Automatic Connectivity Troubleshooting
+
+NISE supports automatic zone resolution when troubleshooting connectivity.
+
+Engineers can provide only:
+
+- source IP
+- destination IP
+- application OR protocol/port
+
+NISE automatically determines:
+
+IP
+↓
+Route lookup
+↓
+Egress interface
+↓
+Zone binding
+↓
+Resolved zone
+
+Example command:
+
+docker run -it --rm -v ${PWD}:/app nise python main.py troubleshoot-auto sample_panorama.xml "Apex WH" 172.16.90.10 8.8.8.8 ssl
+
+Example output:
+
+Resolved source zone: Internal  
+Route/Subnet: 172.16.80.0/20
+
+Resolved destination zone: Public  
+Route/Subnet: 0.0.0.0/0
+
+Result: ALLOWED  
+Matched rule: Streaming Media Web
 
 ---
 
@@ -173,6 +211,66 @@ NISE resolves:
 
 10.1.1.10 → Public
 10.2.2.20 → Internal-VRF1
+
+---
+
+# Future Platform Vision
+
+NISE is designed to evolve beyond a configuration analysis tool into a full **Network Security Intelligence Platform**.
+
+Future platform capabilities will include:
+
+### Network Reasoning Engine
+
+NISE will not only parse configurations but will reason about **how networks behave** by combining:
+
+- routing decisions
+- firewall policy evaluation
+- NAT transformations
+- load balancer decisions
+- cloud security controls
+
+This allows NISE to answer complex operational questions such as:
+
+- Why is this application failing?
+- What security control is blocking traffic?
+- What network path is being used?
+- What systems are exposed during an attack?
+
+---
+
+### Network Behavior Simulation
+
+Future versions of NISE will simulate end-to-end network behavior across multiple infrastructure layers.
+
+Example reasoning chain:
+
+Client → Routing → Firewall → NAT → Load Balancer → Server
+
+This will allow engineers to troubleshoot complex environments without manually tracing traffic across devices.
+
+---
+
+### Privacy-Preserving Intelligence
+
+NISE may optionally collect **anonymized operational metrics** to improve analysis accuracy and security recommendations.
+
+Collected data will never include:
+
+- IP addresses
+- hostnames
+- configuration details
+- log contents
+
+Instead, NISE may collect aggregated metrics such as:
+
+- rule counts
+- exposure patterns
+- troubleshooting mismatch statistics
+- blast radius characteristics
+
+This allows NISE to improve its reasoning models while preserving customer privacy.
+
 
 
 ---
@@ -232,9 +330,10 @@ docker run -it --rm -v ${PWD}:/app nise python main.py troubleshoot sample_panor
 
 ## Roadmap
 
-### Near-term development priorities:
+### Near-term development priorities
 
 - NAT-aware troubleshooting
+- service object and service group resolution
 - return-path analysis
 - dynamic route table support (live firewall RIB queries)
 - asymmetric path detection
@@ -263,7 +362,8 @@ NISE aims to evolve into a comprehensive security intelligence platform capable 
 - simulating policy behavior
 - providing security posture insights
 - assisting engineers with real-time troubleshooting
-
+- instead of competing with large players like Tufin, AlgoSec and big name suites, CorNETiQ sets itself apart as being a product above and beyond their capabilities
+- grow CorNETiQ into a $555 Million company within the next 18 months by leading the network security intelligence space
 ---
 
 # License

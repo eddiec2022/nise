@@ -36,6 +36,30 @@ Primary design goals:
 - Cross-vendor visibility
 
 ---
+## Long-Term Vision
+
+NISE aims to become the **reasoning engine for network security infrastructure**.
+
+Rather than simply managing firewall configurations, NISE will model how networks behave by combining multiple infrastructure layers.
+
+Future reasoning capabilities will include:
+
+- firewall policy evaluation
+- routing path analysis
+- NAT transformation modeling
+- load balancer decision simulation
+- cloud network security reasoning
+
+This will allow NISE to answer complex operational questions such as:
+
+- Why is this application failing?
+- What network path is being used?
+- Which control is blocking traffic?
+- What systems are reachable during a breach?
+
+The long-term goal is to provide engineers with **real-time network reasoning and security intelligence across the entire network stack**.
+
+---
 
 # Current Architecture
 
@@ -398,4 +422,34 @@ Future features include:
 - cloud security visibility
 - policy optimization recommendations
 
+---
 
+# Future Vision
+
+Network Behavior Simulation
+
+NISE is designed to evolve beyond firewall configuration analysis into a network behavior simulation platform.
+
+Future versions of NISE will model the full decision chain that determines how traffic flows through network infrastructure.
+
+Instead of analyzing firewall rules in isolation, NISE will simulate behavior across multiple enforcement layers, including:
+
+routing decisions
+
+NAT transformations
+
+firewall policy evaluation
+
+load balancer forwarding
+
+cloud security controls
+
+identity-based access policies
+
+This capability will allow NISE to answer complex questions such as:
+
+Can this user reach this system?
+
+and explain the complete path across all infrastructure components that influence that decision.
+
+By modeling network behavior rather than individual device configurations, NISE aims to become a continuous network validation and security reasoning platform.

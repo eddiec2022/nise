@@ -1,5 +1,9 @@
 # NISE Architecture
 
+Separate Data Model from Reasoning Engines (Vendors → Parsers → Normalized Model → Reasoning Engines)
+	The Normalized Model must be the center of the system.
+	Nothing else should bypass it.
+
 ## Core Processing Pipeline
 
 
@@ -141,7 +145,49 @@ Example question NISE answers:
 
 Can host A reach host B on HTTPS?
 
+---
 
+# Forwarding Intelligence Layer
+
+Location:
+
+app/analysis/
+- route_lookup.py
+- zone_resolver.py
+
+Purpose:
+
+Simulate firewall forwarding decisions before policy evaluation.
+
+Capabilities include:
+
+- route lookup engine
+- longest-prefix route matching
+- interface resolution
+- zone binding resolution
+- automatic IP → zone mapping
+
+Forwarding resolution pipeline:
+
+IP address
+↓
+Longest-prefix route lookup
+↓
+Egress interface
+↓
+Zone binding
+↓
+Resolved zone
+
+Example:
+
+172.16.90.10
+↓
+Route match: 172.16.80.0/20
+↓
+Interface: ethernet1/3
+↓
+Zone: Internal
 ---
 
 # Exposure Engine (APE)
@@ -187,6 +233,40 @@ Output now includes:
 - reachable zones
 - rule-aware path hops
 - rules responsible for connectivity
+
+---
+
+# Network Behavior Engine (Future)
+
+Future versions of NISE will introduce a **Network Behavior Engine (NBE)**.
+
+The NBE will simulate full network decision paths across multiple infrastructure layers.
+
+Example reasoning chain:
+
+Client
+↓
+Routing decision
+↓
+Firewall policy evaluation
+↓
+NAT transformation
+↓
+Load balancer decision
+↓
+Application server
+
+This engine will allow NISE to analyze and simulate complex network flows across multiple devices and security controls.
+
+Capabilities will include:
+
+- routing path simulation
+- NAT transformation modeling
+- load balancer decision logic
+- multi-hop path analysis
+- cloud security control reasoning
+
+This transforms NISE from a firewall analyzer into a **full network behavior simulation platform**.
 
 ---
 
@@ -239,13 +319,13 @@ Explain **why specific traffic is allowed or blocked** by firewall policy.
 
 Capabilities:
 
-- full rule evaluation simulation
 - address object resolution
 - address group resolution
-- application and service evaluation
-- candidate rule ranking
-- mismatch explanation
-- best-match policy identification
+- application group resolution
+- service object resolution
+- service group resolution
+- forwarding-aware zone resolution
+- rule evaluation simulation
 
 The engine evaluates:
 
@@ -547,3 +627,77 @@ For example:
 - once normalized, the engines should analyze them the same way
 
 This keeps NISE scalable, maintainable, and ready for future multi-vendor expansion without requiring a redesign of the analysis engines.
+
+### Future Architectural Direction
+
+Future Direction: Network Behavior Simulation
+
+NISE is evolving beyond firewall configuration analysis toward a network behavior simulation platform.
+
+Rather than modeling only firewall policy decisions, future versions of NISE will simulate the complete network decision chain that determines whether traffic succeeds or fails.
+
+This includes reasoning across multiple infrastructure layers.
+
+Example packet evaluation flow:
+
+Source IP
+↓
+Routing decision
+↓
+Egress interface
+↓
+Zone resolution
+↓
+NAT translation
+↓
+Firewall policy evaluation
+↓
+Load balancer decision
+↓
+Cloud security policy
+↓
+Destination reachability
+
+Each stage will be represented as a normalized decision step in the NISE reasoning engine.
+
+This approach allows NISE to model and explain network behavior across multiple enforcement points while preserving the core architectural rule:
+
+Vendor-specific behavior is handled in parsers, while reasoning engines operate only on normalized objects.
+
+This enables NISE to support additional technologies such as:
+
+NAT flow simulation
+
+routing path analysis
+
+load balancer decision modeling
+
+cloud security group analysis
+
+identity-based access controls
+
+without redesigning the core reasoning engine.
+
+---
+
+# Intelligence Layer (Future)
+
+NISE will eventually include an intelligence layer designed to learn from large-scale network environments while preserving customer privacy.
+
+This layer will use anonymized metrics derived from network analysis.
+
+Examples of collected intelligence signals:
+
+- rule structure patterns
+- exposure characteristics
+- troubleshooting failure patterns
+- blast radius distributions
+- remediation success rates
+
+These insights will allow NISE to provide:
+
+- better troubleshooting recommendations
+- risk benchmarking
+- improved remediation suggestions
+
+All telemetry will be optional and privacy-preserving.
