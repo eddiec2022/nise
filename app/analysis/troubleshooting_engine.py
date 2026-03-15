@@ -1,8 +1,10 @@
-from typing import Dict, List, Optional
+from dataclasses import replace as dataclass_replace
+from typing import Dict, List, Optional, Set
 
 from app.analysis.exposure_engine import ExposureEngine
 from app.analysis.traffic_identity import TrafficIdentity, TrafficIdentityBuilder
 from app.analysis.zone_resolver import ZoneResolver
+from app.models.nat_model import NatRule, TranslationResult
 from app.models.normalized_firewall_model import (
     FirewallConfig,
     Interface,
@@ -13,6 +15,7 @@ from app.models.normalized_firewall_model import (
     VirtualRouter,
     ZoneBinding,
 )
+from app.simulation.nat_simulator import NatSimulator
 from app.simulation.policy_simulator import PolicySimulator
 
 
@@ -23,6 +26,7 @@ class TroubleshootingEngine:
         self.policy_simulator = PolicySimulator()
         self.exposure_engine = ExposureEngine()
         self.identity_builder = TrafficIdentityBuilder()
+        self.nat_simulator = NatSimulator()
 
     def analyze_traffic(
         self,
@@ -35,6 +39,7 @@ class TroubleshootingEngine:
         application: Optional[str] = None,
         protocol: Optional[str] = None,
         port: Optional[int] = None,
+        nat_rules: Optional[List[NatRule]] = None,
     ) -> Dict:
         scope = self._find_effective_scope(config, scope_name)
         if scope is None:
@@ -105,6 +110,60 @@ class TroubleshootingEngine:
                 "available_zones": available_zones,
             }
 
+        # --- NAT evaluation (v1) -------------------------------------------
+        # Runs after zone resolution, before security policy iteration.
+        # Returns translation facts only. The effective_traffic view below
+        # carries translated addresses into rule evaluation; all output fields
+        # still report the original source/destination IPs separately.
+        nat_result: Optional[TranslationResult] = None
+        effective_traffic = traffic
+
+        # Resolve which NAT rules to evaluate. Explicit nat_rules arg takes
+        # precedence (used for tests and direct injection). Otherwise, load
+        # normalized NatRule objects from the effective scope — this will
+        # produce results once the parser populates scope.nat_rules with
+        # NatRule instances rather than the current placeholder strings.
+        resolved_nat_rules: List[NatRule] = []
+        if nat_rules is not None:
+            resolved_nat_rules = nat_rules
+        else:
+            resolved_nat_rules = [r for r in scope.nat_rules if isinstance(r, NatRule)]
+
+        if resolved_nat_rules:
+            nat_result = self.nat_simulator.simulate(
+                nat_rules=resolved_nat_rules,
+                source_ip=source_ip,
+                destination_ip=destination_ip,
+                service=self._derive_service_string(traffic),
+                from_zone=source_zone,
+                to_zone=destination_zone,
+            )
+            if nat_result.nat_applied:
+                service_changed = (
+                    nat_result.destination_translation_applied
+                    and nat_result.service_after != nat_result.service_before
+                )
+                translated_protocol = traffic.protocol
+                translated_port = traffic.port
+                translated_candidate_services = traffic.candidate_services
+                if service_changed:
+                    translated_candidate_services = {nat_result.service_after}
+                    parsed_proto, parsed_port = self._parse_service_string(
+                        nat_result.service_after
+                    )
+                    if parsed_proto is not None:
+                        translated_protocol = parsed_proto
+                        translated_port = parsed_port
+                effective_traffic = dataclass_replace(
+                    traffic,
+                    source_ip=nat_result.source_ip_after,
+                    destination_ip=nat_result.destination_ip_after,
+                    candidate_services=translated_candidate_services,
+                    protocol=translated_protocol,
+                    port=translated_port,
+                )
+        # -------------------------------------------------------------------
+
         blast_radius = self.exposure_engine.analyze_blast_radius(
             config=config,
             scope_name=scope_name,
@@ -128,7 +187,7 @@ class TroubleshootingEngine:
                 rule=rule,
                 source_zone=source_zone,
                 destination_zone=destination_zone,
-                traffic=traffic,
+                traffic=effective_traffic,
                 object_map=object_map,
                 group_map=group_map,
                 app_group_map=app_group_map,
@@ -159,6 +218,7 @@ class TroubleshootingEngine:
                         f"Traffic matched rule '{rule.name}' at position {index}. "
                         f"Action: {rule.action}."
                     ),
+                    "nat": self._build_nat_section(nat_result),
                 }
 
             candidate_rules.append(
@@ -197,6 +257,7 @@ class TroubleshootingEngine:
                     f"to zone '{destination_zone}'."
                 ),
                 "candidate_rules": top_candidates,
+                "nat": self._build_nat_section(nat_result),
             }
 
         return {
@@ -224,6 +285,7 @@ class TroubleshootingEngine:
                 "provided traffic identity."
             ),
             "candidate_rules": top_candidates,
+            "nat": self._build_nat_section(nat_result),
         }
 
     def _find_effective_scope(self, config: FirewallConfig, scope_name: str) -> Optional[Scope]:
@@ -583,6 +645,52 @@ class TroubleshootingEngine:
             "service": "service mismatch",
         }
         return labels.get(check_name, check_name)
+
+    def _derive_service_string(self, traffic: TrafficIdentity) -> str:
+        """
+        Derive a single service string from a TrafficIdentity for use as the
+        NAT simulator service input. Returns the most specific available value.
+        """
+        if traffic.protocol and traffic.port is not None:
+            return f"{traffic.protocol}/{traffic.port}"
+        if traffic.candidate_services:
+            return next(iter(sorted(traffic.candidate_services)))
+        return "any"
+
+    def _parse_service_string(self, service: str) -> tuple[Optional[str], Optional[int]]:
+        """
+        Parse a protocol/port service string into its components.
+        Returns (protocol, port) if the string is in tcp/N or udp/N form,
+        otherwise returns (None, None).
+        """
+        import re
+        match = re.fullmatch(r"(tcp|udp)/(\d+)", service)
+        if match:
+            return match.group(1), int(match.group(2))
+        return None, None
+
+    def _build_nat_section(self, nat_result: Optional[TranslationResult]) -> Dict:
+        """
+        Build the NAT sub-section included in troubleshooting output.
+
+        When no NAT rules were provided to analyze_traffic(), nat_result is
+        None and the section simply reports applied=False. When NAT rules were
+        provided, all translation facts from the simulation are included so
+        that callers can display a complete NAT explanation.
+        """
+        if nat_result is None:
+            return {"applied": False}
+        return {
+            "applied": nat_result.nat_applied,
+            "matched_rule": nat_result.matched_rule_name,
+            "source_before": nat_result.source_ip_before,
+            "source_after": nat_result.source_ip_after,
+            "destination_before": nat_result.destination_ip_before,
+            "destination_after": nat_result.destination_ip_after,
+            "service_before": nat_result.service_before,
+            "service_after": nat_result.service_after,
+            "explanation_steps": nat_result.explanation_steps,
+        }
 
     @staticmethod
     def _zone_matches(rule_zones: List[str], zone: str) -> bool:
