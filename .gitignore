@@ -9,3 +9,5 @@ venv/
 output/
 *.zip
 *.log
+
+.claude/settings.local.json
