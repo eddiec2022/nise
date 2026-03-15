@@ -3,6 +3,12 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from lxml import etree
 
+from app.models.nat_model import (
+    DestinationTranslation,
+    NatRule,
+    SourceTranslation,
+    SourceTranslationType,
+)
 from app.models.normalized_firewall_model import (
     AddressGroup,
     AddressObject,
@@ -102,7 +108,7 @@ class PaloAltoParser(BaseParser):
             scope.security_rules = [self._parse_security_rule(rule) for rule in sec_rule_entries]
 
             nat_rule_entries = vsys.findall("./rulebase/nat/rules/entry") if vsys is not None else []
-            scope.nat_rules = self._extract_names(nat_rule_entries)
+            scope.nat_rules = [self._parse_nat_rule(e, i) for i, e in enumerate(nat_rule_entries)]
 
             zone_by_interface = self._build_zone_by_interface(scope.zone_bindings)
             vr_by_interface = self._build_vr_by_interface(global_virtual_routers)
@@ -150,11 +156,11 @@ class PaloAltoParser(BaseParser):
         shared_post_rules = self.root.findall(".//shared/post-rulebase/security/rules/entry")
         shared_scope.security_rules = [self._parse_security_rule(rule) for rule in (shared_pre_rules + shared_post_rules)]
 
-        shared_scope.nat_rules = self._extract_names(
-            self.root.findall(".//shared/pre-rulebase/nat/rules/entry")
-        ) + self._extract_names(
-            self.root.findall(".//shared/post-rulebase/nat/rules/entry")
-        )
+        shared_pre_nat = self.root.findall(".//shared/pre-rulebase/nat/rules/entry")
+        shared_post_nat = self.root.findall(".//shared/post-rulebase/nat/rules/entry")
+        shared_scope.nat_rules = [
+            self._parse_nat_rule(e, i) for i, e in enumerate(shared_pre_nat + shared_post_nat)
+        ]
 
         if any(shared_scope.summary().values()):
             config.scopes.append(shared_scope)
@@ -188,10 +194,11 @@ class PaloAltoParser(BaseParser):
             dg_post_rules = dg.findall("./post-rulebase/security/rules/entry")
             scope.security_rules = [self._parse_security_rule(rule) for rule in (dg_pre_rules + dg_post_rules)]
 
-            scope.nat_rules = (
-                self._extract_names(dg.findall("./pre-rulebase/nat/rules/entry")) +
-                self._extract_names(dg.findall("./post-rulebase/nat/rules/entry"))
-            )
+            dg_pre_nat = dg.findall("./pre-rulebase/nat/rules/entry")
+            dg_post_nat = dg.findall("./post-rulebase/nat/rules/entry")
+            scope.nat_rules = [
+                self._parse_nat_rule(e, i) for i, e in enumerate(dg_pre_nat + dg_post_nat)
+            ]
 
             self._refresh_scope_deployment_modes(scope)
             config.scopes.append(scope)
@@ -549,6 +556,84 @@ class PaloAltoParser(BaseParser):
             profile_file_blocking=rule_entry.findtext("./profile-setting/profiles/file-blocking/member"),
             profile_wildfire_analysis=rule_entry.findtext("./profile-setting/profiles/wildfire-analysis/member"),
             raw={"xml_tag": rule_entry.tag},
+        )
+
+    def _parse_nat_rule(self, entry: etree._Element, rule_order: int) -> NatRule:
+        return NatRule(
+            name=entry.get("name", "unnamed-nat-rule"),
+            enabled=not self._to_bool(entry.findtext("./disabled", default="no")),
+            from_zones=self._member_values(entry.findall("./from/member")),
+            to_zones=self._member_values(entry.findall("./to/member")),
+            source_addresses=self._member_values(entry.findall("./source/member")),
+            destination_addresses=self._member_values(entry.findall("./destination/member")),
+            services=self._parse_nat_service(entry),
+            source_translation=self._parse_source_translation(
+                entry.find("./source-translation")
+            ),
+            destination_translation=self._parse_destination_translation(
+                entry.find("./destination-translation")
+            ),
+            rule_order=rule_order,
+            description=entry.findtext("./description"),
+            tags=self._member_values(entry.findall("./tag/member")),
+        )
+
+    def _parse_nat_service(self, entry: etree._Element) -> List[str]:
+        svc = entry.findtext("./service")
+        if svc and svc.strip():
+            return [svc.strip()]
+        return ["any"]
+
+    def _parse_source_translation(
+        self, node: Optional[etree._Element]
+    ) -> Optional[SourceTranslation]:
+        if node is None:
+            return None
+
+        static_ip = node.find("./static-ip")
+        if static_ip is not None:
+            addr = static_ip.findtext("./translated-address")
+            return SourceTranslation(
+                type=SourceTranslationType.STATIC_IP,
+                translated_addresses=[addr] if addr else [],
+            )
+
+        dynamic_ip = node.find("./dynamic-ip")
+        if dynamic_ip is not None:
+            addrs = self._member_values(dynamic_ip.findall("./translated-address/member"))
+            return SourceTranslation(
+                type=SourceTranslationType.DYNAMIC_IP,
+                translated_addresses=addrs,
+            )
+
+        diap = node.find("./dynamic-ip-and-port")
+        if diap is not None:
+            iface_node = diap.find("./interface-address")
+            if iface_node is not None:
+                return SourceTranslation(
+                    type=SourceTranslationType.INTERFACE_ADDRESS,
+                    interface_name=iface_node.findtext("./interface"),
+                )
+            addrs = self._member_values(diap.findall("./translated-address/member"))
+            return SourceTranslation(
+                type=SourceTranslationType.DYNAMIC_IP_AND_PORT,
+                translated_addresses=addrs,
+            )
+
+        return None
+
+    def _parse_destination_translation(
+        self, node: Optional[etree._Element]
+    ) -> Optional[DestinationTranslation]:
+        if node is None:
+            return None
+        translated_address = node.findtext("./translated-address")
+        translated_port = self._safe_int(node.findtext("./translated-port"))
+        if translated_address is None and translated_port is None:
+            return None
+        return DestinationTranslation(
+            translated_address=translated_address,
+            translated_port=translated_port,
         )
 
     @staticmethod

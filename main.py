@@ -345,6 +345,23 @@ def print_troubleshooting_result(result: dict, auto_mode: bool = False) -> None:
     else:
         print("  None")
 
+    nat = result.get("nat")
+    if nat is not None:
+        print("\nNAT evaluation:")
+        if nat.get("applied"):
+            print(f"  Applied:     yes")
+            print(f"  Matched rule: {nat.get('matched_rule')}")
+            print(f"  Source:      {nat.get('source_before')} -> {nat.get('source_after')}")
+            print(f"  Destination: {nat.get('destination_before')} -> {nat.get('destination_after')}")
+            print(f"  Service:     {nat.get('service_before')} -> {nat.get('service_after')}")
+            steps = nat.get("explanation_steps", [])
+            if steps:
+                print("  Steps:")
+                for step in steps:
+                    print(f"    {step}")
+        else:
+            print("  Applied: no")
+
     candidate_rules = result.get("candidate_rules", [])
     if candidate_rules:
         best = candidate_rules[0]

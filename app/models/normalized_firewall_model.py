@@ -1,6 +1,9 @@
 from enum import Enum
-from typing import List, Dict, Optional
+from typing import TYPE_CHECKING, List, Dict, Optional
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from app.models.nat_model import NatRule
 
 
 class Vendor(str, Enum):
@@ -112,7 +115,7 @@ class Scope(BaseModel):
     service_groups: List[str] = Field(default_factory=list)
     application_groups: List[ApplicationGroup] = Field(default_factory=list)
     security_rules: List["SecurityRule"] = Field(default_factory=list)
-    nat_rules: List[str] = Field(default_factory=list)
+    nat_rules: List["NatRule"] = Field(default_factory=list)
 
     interfaces: List[Interface] = Field(default_factory=list)
     zone_bindings: List[ZoneBinding] = Field(default_factory=list)
