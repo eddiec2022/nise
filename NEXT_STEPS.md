@@ -115,18 +115,6 @@ Capabilities to add:
 
 ---
 
-## NAT-Aware Troubleshooting
-
-Enhance troubleshooting to consider NAT transformations.
-
-Capabilities:
-
-- pre-NAT vs post-NAT traffic evaluation
-- source NAT handling
-- destination NAT handling
-
----
-
 ## Routing Awareness
 
 ## Forwarding Intelligence Enhancements
@@ -239,9 +227,21 @@ Phase 1 – Core Reasoning Engine (Current Phase)
 - Connectivity troubleshooting engine
 - Route-aware zone resolution
 
-Phase 2 – Platform Foundation
-- Intent-aware network validation
-- Configuration drift detection
+Phase 2 — Intent-Based Network Validation
+
+Allow engineers to define intended network behavior and automatically verify that the current configuration enforces it.
+
+Example: 
+
+User VLAN → Domain Controllers = DENY
+
+NISE will simulate network behavior and detect violations where real connectivity contradicts declared intent.
+
+Capabilities:
+
+- segmentation validation
+- policy drift detection
+- continuous security posture verification
 - Continuous exposure monitoring
 - Web UI
 

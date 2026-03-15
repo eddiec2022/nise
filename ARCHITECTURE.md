@@ -270,6 +270,39 @@ This transforms NISE from a firewall analyzer into a **full network behavior sim
 
 ---
 
+# Flow Decision Model (Future)
+
+Future versions of NISE will represent packet handling as a sequence of normalized decision steps.
+
+Each step represents a decision made by network infrastructure, such as:
+
+- route lookup
+- zone resolution
+- NAT translation
+- security policy evaluation
+- load balancer selection
+- cloud security control enforcement
+
+These steps will form a Flow Decision Graph that allows NISE to explain the full reasoning chain behind a traffic outcome.
+
+Example:
+
+Client
+↓
+Route Lookup
+↓
+Zone Resolution
+↓
+NAT Translation
+↓
+Security Policy Evaluation
+↓
+Destination Reachability
+
+This model allows NISE to simulate complex network paths across multiple devices and enforcement layers.
+
+---
+
 # Critical Asset Exposure Engine
 
 Location:

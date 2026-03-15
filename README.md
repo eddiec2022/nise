@@ -363,7 +363,7 @@ NISE aims to evolve into a comprehensive security intelligence platform capable 
 - providing security posture insights
 - assisting engineers with real-time troubleshooting
 - instead of competing with large players like Tufin, AlgoSec and big name suites, CorNETiQ sets itself apart as being a product above and beyond their capabilities
-- grow CorNETiQ into a $555 Million company within the next 18 months by leading the network security intelligence space
+- Position CorNETiQ as a leader in network security intelligence platforms.
 ---
 
 # License
